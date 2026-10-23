@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Warranty Portal</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f4f5f7; color: #1d2330; margin: 0; }
+  header { background: #1f3a5f; color: #fff; padding: 14px 20px; font-size: 18px; }
+  main { max-width: 560px; margin: 24px auto; background: #fff; padding: 24px; border-radius: 8px; }
+  label { display: block; margin-top: 14px; font-weight: 600; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 4px; font-size: 15px; border: 1px solid #b8bfcc; border-radius: 4px; }
+  textarea { min-height: 70px; }
+  button { margin-top: 20px; padding: 10px 18px; font-size: 15px; background: #1f3a5f; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+  .error { color: #b00020; margin-top: 12px; }
+  .note { font-size: 13px; color: #5b6475; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
+  dt { font-weight: 600; }
+  #claim-number { font-size: 22px; font-weight: 700; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>Mock Manufacturer Warranty Portal <span class="note" style="color:#cfd8e6">(test site, not a real manufacturer)</span></header>
+<main>
+
+  <section id="login-view">
+    <h1>Sign in</h1>
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password">
+      <button id="login-button" type="submit">Sign in</button>
+      <div id="login-error" class="error" hidden>Incorrect username or password.</div>
+    </form>
+  </section>
+
+  <section id="claim-view" hidden>
+    <h1>New warranty claim</h1>
+    <p class="note">Signed in as <span id="signed-in-user"></span>. Labor hours and parts used are optional; every other field is required.</p>
+    <form id="claim-form">
+      <label for="truck-id">Truck ID</label>
+      <input id="truck-id" name="truckId" required>
+      <label for="repair-date">Repair date</label>
+      <input id="repair-date" name="repairDate" type="date" required>
+      <label for="failed-part">Failed part</label>
+      <input id="failed-part" name="failedPart" required>
+      <label for="part-number">Part number</label>
+      <input id="part-number" name="partNumber" required>
+      <label for="failure-cause">Cause of failure</label>
+      <textarea id="failure-cause" name="failureCause" required></textarea>
+      <label for="mileage">Mileage at repair</label>
+      <input id="mileage" name="mileage" type="number" min="0" required>
+      <label for="labor-hours">Labor hours</label>
+      <input id="labor-hours" name="laborHours" type="number" min="0" step="0.1">
+      <label for="parts-used">Parts used</label>
+      <textarea id="parts-used" name="partsUsed"></textarea>
+      <button id="submit-claim" type="submit">Submit claim</button>
+      <div id="claim-error" class="error" hidden></div>
+    </form>
+  </section>
+
+  <section id="confirmation-view" hidden>
+    <h1>Claim submitted</h1>
+    <p>Claim number: <span id="claim-number"></span></p>
+    <dl id="claim-summary"></dl>
+    <button id="new-claim" type="button">Submit another claim</button>
+  </section>
+
+</main>
+<script>
+  // Test login for this mock site. Only a SHA-256 hash of the password is stored here.
+  const USERNAME = "meridian-claims";
+  const PASSWORD_SHA256 = "4a32c1cd8ff65517f491a8efa522f04d1292c1f20d10597e2ef74ff7fb06bb76";
+
+  const $ = (id) => document.getElementById(id);
+  const views = ["login-view", "claim-view", "confirmation-view"];
+  function show(view) { views.forEach((v) => { $(v).hidden = v !== view; }); }
+
+  async function sha256(text) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function signedIn() {
+    try { return sessionStorage.getItem("portal-user"); } catch { return window.__portalUser || null; }
+  }
+  function setSignedIn(user) {
+    try { sessionStorage.setItem("portal-user", user); } catch { window.__portalUser = user; }
+  }
+
+  function openClaimForm() {
+    $("signed-in-user").textContent = signedIn();
+    $("claim-form").reset();
+    show("claim-view");
+  }
+
+  $("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const user = $("username").value.trim();
+    const ok = user === USERNAME && (await sha256($("password").value)) === PASSWORD_SHA256;
+    $("password").value = "";
+    if (!ok) { $("login-error").hidden = false; return; }
+    $("login-error").hidden = true;
+    setSignedIn(user);
+    openClaimForm();
+  });
+
+  const LABELS = {
+    truckId: "Truck ID", repairDate: "Repair date", failedPart: "Failed part", partNumber: "Part number",
+    failureCause: "Cause of failure", mileage: "Mileage", laborHours: "Labor hours", partsUsed: "Parts used",
+  };
+
+  $("claim-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData($("claim-form")).entries());
+    const OPTIONAL = ["laborHours", "partsUsed"];
+    const empty = Object.keys(LABELS).filter((k) => !OPTIONAL.includes(k)).filter((k) => !String(data[k] || "").trim());
+    if (empty.length) {
+      $("claim-error").textContent = "Missing: " + empty.map((k) => LABELS[k]).join(", ");
+      $("claim-error").hidden = false;
+      return;
+    }
+    $("claim-error").hidden = true;
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const claimNumber = "WC-" + stamp + "-" + Math.floor(1000 + Math.random() * 9000);
+    $("claim-number").textContent = claimNumber;
+    const dl = $("claim-summary");
+    dl.innerHTML = "";
+    Object.entries(LABELS).forEach(([k, label]) => {
+      const dt = document.createElement("dt"); dt.textContent = label;
+      const dd = document.createElement("dd"); dd.textContent = String(data[k] || "").trim() || "(not provided)";
+      dl.append(dt, dd);
+    });
+    show("confirmation-view");
+  });
+
+  $("new-claim").addEventListener("click", openClaimForm);
+
+  if (signedIn()) openClaimForm(); else show("login-view");
+</script>
+</body>
+</html>
